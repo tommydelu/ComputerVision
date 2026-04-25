@@ -4,7 +4,6 @@ import cv2 as cv
 import numpy as np
 import pandas as pd
 from scipy.interpolate import RBFInterpolator
-from tqdm import tqdm
 
 
 #--------------------------------------------------------------------------------------------------------------------------------#
@@ -36,8 +35,11 @@ else:
     SRC_PATH = os.path.join(GLOBAL_PATH,'ALIGNMENT_PREPOST','alignment_color_superposition_3')
     DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'FBK_field_on_coloured_superposition_1')
 
-if not os.path.exists(DST_PATH):
-    os.makedirs(DST_PATH)
+
+RBF_DST_PATH = os.path.join(GLOBAL_PATH,'OPTICAL_FLOW','RBF_matrices_prova1')
+
+if not os.path.exists(RBF_DST_PATH):
+    os.makedirs(RBF_DST_PATH)
 
 
 
@@ -217,7 +219,7 @@ if __name__ == '__main__':
 
     all_patients_data = []
 
-    for fname in tqdm(sorted(os.listdir(IR_ALIGNED_PATH))):
+    for fname in sorted(os.listdir(IR_ALIGNED_PATH)):
 
         subject_data = create_subject_data(fname)
 
@@ -232,7 +234,7 @@ if __name__ == '__main__':
         
         magnitude = np.sqrt(optical_flow_field[:,:,0]**2 + optical_flow_field[:,:,1]**2)
         mask_magnitude = (magnitude < MAX_ALLOWED_MOVEMENT)
-        mask_labelPre = (subject_data['LABEL PRE'] == 0).astype(np.bool)
+        mask_labelPre = (subject_data['LABEL PRE'] > 0).astype(np.bool)
         
         # Adesso devo creare il vettore di coordinate da passare all'RBF interpolator       
         x = np.arange(w)
@@ -245,27 +247,31 @@ if __name__ == '__main__':
         valid_coordinates = np.column_stack([xx_valid,yy_valid])
         valid_values = optical_flow_field[mask_labelPre & mask_magnitude]
 
-        
-
-        #------------------------------------------------------------------------------------------------------------------#
-
-
-        # Per alleggerire il peso computazionale prendo coordinate discrete impostando un certo step
-        valid_coordinates = valid_coordinates[::10]
-        valid_values = valid_values[::10]
-
-        #------------------------------------------------------------------------------------------------------------------#
-
-
-
-        rbf = RBFInterpolator(valid_coordinates,valid_values,kernel='thin_plate_spline')
+        step = 40
+        rbf = RBFInterpolator(valid_coordinates[::step],valid_values[::step],kernel='thin_plate_spline')
 
         all_coordinates = np.column_stack([xx.flatten(),yy.flatten()]) # calcolo l'interpolazione su tutte le coordinate
         print("Inizio calcolo vector field interpolato")
 
-        interpolated_field = rbf(all_coordinates).reshape(h, w, 2) # faccio un reshape finale per ottenere la forma originale
+        #-------------------------------------------------------------------------------------------------------------#
 
-        
+
+
+        # Calcolo il campo interpolato a blocchi (chunk) per non saturare la RAM
+
+        chunk_size = 30000
+        chunk_result = []
+        for i in range(0,len(all_coordinates),chunk_size):
+             field_at_chunk = rbf(all_coordinates[i:i+chunk_size])
+             chunk_result.append(field_at_chunk)
+
+        interpolated_field = np.vstack(chunk_result).reshape(h, w, 2)
+
+        output_npy = os.path.join(RBF_DST_PATH, f"{subject_data['ID']}_rbf_array.npy")
+        np.save(output_npy, interpolated_field)
+
+        #-------------------------------------------------------------------------------------------------------------#
+
         print(f"Analisi per il soggetto {subject_data['ID']} terminata!\n")
 
 
