@@ -15,10 +15,10 @@ import matplotlib.patches as patches
 # I miei path
 GLOBAL_PATH        = os.getcwd()
 IR_ALIGNED_PATH    = os.path.join(GLOBAL_PATH, 'ALIGNMENT_PREPOST', 'aligned_imgs_3')
-MASKS_PATH         = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'segmentation_results_1')
+MASKS_PATH         = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'best_10_subjects_segmentation_1')
 LABELS_PATH        = os.path.join(GLOBAL_PATH, 'DATASET', 'labels_reversed')
 CSV_SEG_PATH       = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW','segmentation_1.csv')
-CSV_RBF_FIELD_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW','RBF_quadrants_results.csv')
+CSV_RBF_FIELD_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW','RBF_quadrants_results_my_masks.csv')
 
 DRAW_OPTIONS = {'IR': 1, 'labels': 2, 'coloured_superposition': 3}
 DRAW_ON = DRAW_OPTIONS['labels']
@@ -26,17 +26,17 @@ DRAW_ON = DRAW_OPTIONS['labels']
 # In base all'opzione definisco un src path da cui prendere le immagini, e un dst path in cui inserire le immagini modificate
 if DRAW_ON == 1:
     SRC_PATH = IR_ALIGNED_PATH
-    DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'RBF_on_ir')
+    DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'RBF_on_ir_my_masks')
 
 elif DRAW_ON == 2:
     SRC_PATH = LABELS_PATH
-    DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'RBF_on_labels')
+    DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'RBF_on_labels_my_masks')
 
 else:
     SRC_PATH = os.path.join(GLOBAL_PATH,'ALIGNMENT_PREPOST','alignment_color_superposition_3')
-    DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'RBF_on_coloured_superposition')
+    DST_PATH = os.path.join(GLOBAL_PATH, 'OPTICAL_FLOW', 'RBF_on_coloured_superposition_my_masks')
 
-RBF_MATRICES_PATH = os.path.join(GLOBAL_PATH,'OPTICAL_FLOW','RBF_matrices_prova2')
+RBF_MATRICES_PATH = os.path.join(GLOBAL_PATH,'OPTICAL_FLOW','RBF_matrices_my_masks_prova')
 
 if not os.path.exists(RBF_MATRICES_PATH):
     os.makedirs(RBF_MATRICES_PATH)
@@ -95,8 +95,8 @@ results = {"patient_name":        None,
 fovea_center_dict = {'L_06': (918, 1104), 'L_15': (1006, 987), 'L_26': (942, 937), 'L_30': (946, 946), 'L_42': (1016, 1008), 'L_48': (930, 958), 'L_63': (1078, 973), 'L_78': (949, 951), 'S_08': (977, 982), 'S_46': (920, 1123)}
 
 
-COMPUTE_RBF_INTERPOLATOR = False
-COMPUTE_METRICS = True
+COMPUTE_RBF_INTERPOLATOR = True
+COMPUTE_METRICS = False
 
 
 #--------------------------------------------------------------------------------------------------------------------------------#
@@ -145,8 +145,8 @@ def create_subject_data(fname: str) -> dict:
     maskPre  = cv.imread(MASK_PATH1,0)
     maskPost = cv.imread(MASK_PATH2,0)
 
-    labelPre  = cv.imread(LABEL_PATH1,0)
-    labelPost = cv.imread(LABEL_PATH2,0)
+    labelPre  = cv.imread(MASK_PATH1,0)
+    labelPost = cv.imread(MASK_PATH2,0)
 
     # Controllo se la label è flippata in modo giusto o no
     flipped_cols_csv = pd.read_csv(CSV_SEG_PATH, index_col=False,usecols=['SUBJECT','Flipped'])    
@@ -174,8 +174,6 @@ def create_subject_data(fname: str) -> dict:
     subject_dict['ID and PHASE'] = subject_phase
     subject_dict['IMG PRE'] = imgPre
     subject_dict['IMG POST'] = imgPost
-    subject_dict['MASK PRE'] = maskPre
-    subject_dict['MASK POST'] = maskPost
     subject_dict['LABEL PRE'] = labelPre
     subject_dict['LABEL POST'] = labelPost
     subject_dict['DRAW IMG'] = img_colors
@@ -209,7 +207,7 @@ if __name__ == '__main__':
         # CALCOLO OPTICAL FLOW
         optical_flow_field = cv.calcOpticalFlowFarneback(prev=subject_data['IMG PRE'], next=subject_data['IMG POST'], flow=None, pyr_scale=0.5, levels=5, winsize=31, iterations=10, poly_n=7, poly_sigma=1.5, flags=0)
         mask_labels = (subject_data['LABEL PRE'] > 0) & (subject_data['LABEL POST'] > 0)
-        mask_labels = mask_labels.astype(np.bool)
+        mask_labels = mask_labels.astype(bool)
 
         magnitude = np.sqrt(optical_flow_field[:,:,0]**2 + optical_flow_field[:,:,1]**2)
         mask_magnitude = (magnitude < MAX_ALLOWED_MOVEMENT)
@@ -262,10 +260,15 @@ if __name__ == '__main__':
             u = interpolated_field[:,:,0]
             v = interpolated_field[:,:,1]
             magnitude_rbf = np.sqrt(u**2 + v**2)
+
             mask_overshoot = magnitude_rbf > MAX_ALLOWED_MOVEMENT
             scale_factor = MAX_ALLOWED_MOVEMENT / magnitude_rbf[mask_overshoot]
             interpolated_field[mask_overshoot, 0] = u[mask_overshoot] * scale_factor
             interpolated_field[mask_overshoot, 1] = v[mask_overshoot] * scale_factor
+
+            u_final = interpolated_field[:,:,0]
+            v_final = interpolated_field[:,:,1]
+            magnitude_final = np.sqrt(u_final**2 + v_final**2)
 
             y_coords, x_coords = np.indices((h,w)) # dimensions = shape of the grid (1908 x 1908)   
             dx = x_coords - cx
@@ -283,47 +286,47 @@ if __name__ == '__main__':
             mask_left   = ((angle >= 135) | (angle < -135)) 
             mask_bottom = (angle >= -135) & (angle < -45) 
 
-            X_total = safe_mean(u, mask_global)        
-            Y_total = safe_mean(v, mask_global)
-            magnitude_total = safe_mean(magnitude, mask_global)
+            X_total = safe_mean(u_final, mask_global)        
+            Y_total = safe_mean(v_final, mask_global)
+            magnitude_total = safe_mean(magnitude_final, mask_global)
             
-            X_inner_avg = safe_mean(u, mask_inner)
-            Y_inner_avg = safe_mean(v, mask_inner)
-            magnitude_inner_avg = safe_mean(magnitude, mask_inner) 
+            X_inner_avg = safe_mean(u_final, mask_inner)
+            Y_inner_avg = safe_mean(v_final, mask_inner)
+            magnitude_inner_avg = safe_mean(magnitude_final, mask_inner) 
 
-            X_outer_avg = safe_mean(u, mask_outer)
-            Y_outer_avg = safe_mean(v, mask_outer)
-            magnitude_outer_avg = safe_mean(magnitude, mask_outer)
+            X_outer_avg = safe_mean(u_final, mask_outer)
+            Y_outer_avg = safe_mean(v_final, mask_outer)
+            magnitude_outer_avg = safe_mean(magnitude_final, mask_outer)
 
-            X_inner_45  = safe_mean(u, mask_inner & mask_bottom)
-            X_inner_135 = safe_mean(u, mask_inner & mask_left)
-            X_inner_225 = safe_mean(u, mask_inner & mask_top)
-            X_inner_315 = safe_mean(u, mask_inner & mask_right)
+            X_inner_45  = safe_mean(u_final, mask_inner & mask_bottom)
+            X_inner_135 = safe_mean(u_final, mask_inner & mask_left)
+            X_inner_225 = safe_mean(u_final, mask_inner & mask_top)
+            X_inner_315 = safe_mean(u_final, mask_inner & mask_right)
 
-            Y_inner_45  = safe_mean(v, mask_inner & mask_bottom)
-            Y_inner_135 = safe_mean(v, mask_inner & mask_left)
-            Y_inner_225 = safe_mean(v, mask_inner & mask_top)
-            Y_inner_315 = safe_mean(v, mask_inner & mask_right)
+            Y_inner_45  = safe_mean(v_final, mask_inner & mask_bottom)
+            Y_inner_135 = safe_mean(v_final, mask_inner & mask_left)
+            Y_inner_225 = safe_mean(v_final, mask_inner & mask_top)
+            Y_inner_315 = safe_mean(v_final, mask_inner & mask_right)
 
-            magnitude_inner_45  = safe_mean(magnitude, mask_inner & mask_bottom)
-            magnitude_inner_135 = safe_mean(magnitude, mask_inner & mask_left)
-            magnitude_inner_225 = safe_mean(magnitude, mask_inner & mask_top)
-            magnitude_inner_315 = safe_mean(magnitude, mask_inner & mask_right)
+            magnitude_inner_45  = safe_mean(magnitude_final, mask_inner & mask_bottom)
+            magnitude_inner_135 = safe_mean(magnitude_final, mask_inner & mask_left)
+            magnitude_inner_225 = safe_mean(magnitude_final, mask_inner & mask_top)
+            magnitude_inner_315 = safe_mean(magnitude_final, mask_inner & mask_right)
 
-            X_outer_45  = safe_mean(u, mask_outer & mask_bottom)
-            X_outer_135 = safe_mean(u, mask_outer & mask_left)
-            X_outer_225 = safe_mean(u, mask_outer & mask_top)
-            X_outer_315 = safe_mean(u, mask_outer & mask_right)
+            X_outer_45  = safe_mean(u_final, mask_outer & mask_bottom)
+            X_outer_135 = safe_mean(u_final, mask_outer & mask_left)
+            X_outer_225 = safe_mean(u_final, mask_outer & mask_top)
+            X_outer_315 = safe_mean(u_final, mask_outer & mask_right)
 
-            Y_outer_45  = safe_mean(v, mask_outer & mask_bottom)
-            Y_outer_135 = safe_mean(v, mask_outer & mask_left)
-            Y_outer_225 = safe_mean(v, mask_outer & mask_top)
-            Y_outer_315 = safe_mean(v, mask_outer & mask_right)
+            Y_outer_45  = safe_mean(v_final, mask_outer & mask_bottom)
+            Y_outer_135 = safe_mean(v_final, mask_outer & mask_left)
+            Y_outer_225 = safe_mean(v_final, mask_outer & mask_top)
+            Y_outer_315 = safe_mean(v_final, mask_outer & mask_right)
 
-            magnitude_outer_45  = safe_mean(magnitude, mask_outer & mask_bottom)
-            magnitude_outer_135 = safe_mean(magnitude, mask_outer & mask_left)
-            magnitude_outer_225 = safe_mean(magnitude, mask_outer & mask_top)
-            magnitude_outer_315 = safe_mean(magnitude, mask_outer & mask_right)
+            magnitude_outer_45  = safe_mean(magnitude_final, mask_outer & mask_bottom)
+            magnitude_outer_135 = safe_mean(magnitude_final, mask_outer & mask_left)
+            magnitude_outer_225 = safe_mean(magnitude_final, mask_outer & mask_top)
+            magnitude_outer_315 = safe_mean(magnitude_final, mask_outer & mask_right)
 
             # STORING DEI RISULTATI
 
@@ -375,11 +378,13 @@ if __name__ == '__main__':
 
             #---------------------------------- PLOT DEI RISULTATI ----------------------------------#
 
-            fig, ax = plt.subplots(figsize=(12, 12))
+            fig, ax = plt.subplots(figsize=(8, 8))
             ax.imshow(subject_data['DRAW IMG'])
             grid_color = 'white'
             thickness = 1.5
             linestyle = '--'
+            
+            # Disegno cerchi e diagonali
             inner_circle = patches.Circle((cx, cy), INNER_RADIUS, fill=False, edgecolor=grid_color, linewidth=thickness, linestyle=linestyle)
             outer_circle = patches.Circle((cx, cy), OUTER_RADIUS, fill=False, edgecolor=grid_color, linewidth=thickness, linestyle=linestyle)
             ax.add_patch(inner_circle)
@@ -389,27 +394,56 @@ if __name__ == '__main__':
             ax.plot([cx - offset, cx + offset], [cy + offset, cy - offset], color=grid_color, linewidth=thickness, linestyle=linestyle)
 
             ax.plot(cx, cy, marker='+', color=grid_color, markersize=15, markeredgewidth=thickness)
-            step_q = 25
-
+            
+            # 1. Impostazione dinamica di scala e colore in base allo sfondo
             if DRAW_ON == 1:
-                ax.quiver(xx[::step_q,::step_q], yy[::step_q,::step_q], 
-                        interpolated_field[::step_q,::step_q,0], interpolated_field[::step_q,::step_q,1], 
-                        angles='xy', color='darkred', alpha=0.8, scale=200, width=0.0015, headwidth=3)
+                q_color, q_scale = 'lime', 500
             elif DRAW_ON == 2:
-                ax.quiver(xx[::step_q,::step_q], yy[::step_q,::step_q], 
-                        interpolated_field[::step_q,::step_q,0], interpolated_field[::step_q,::step_q,1], 
-                        angles='xy', color='lime', alpha=0.8, scale=200, width=0.0015, headwidth=3)
+                q_color, q_scale = 'lime', 500
             else:
-                ax.quiver(xx[::step_q,::step_q], yy[::step_q,::step_q], 
-                        interpolated_field[::step_q,::step_q,0], interpolated_field[::step_q,::step_q,1], 
-                        angles='xy', color='mediumblue', alpha=0.8, scale=700, width=0.0015, headwidth=3)
+                q_color, q_scale = 'mediumblue', 500
 
+            retina_mask = subject_data['IMG PRE'] < 250
+
+            # Creiamo copie dei vettori per non sporcare i dati originali
+            u_plot = u_final.copy()
+            v_plot = v_final.copy()
+
+            # Mettiamo a NaN tutti i vettori che cadono fuori dalla retina (ora lo sfondo bianco)
+            u_plot[~retina_mask] = np.nan
+            v_plot[~retina_mask] = np.nan
+
+            # 2. Plot del campo vettoriale principale
+            step_q = 30
+            ax.quiver(xx[::step_q,::step_q], yy[::step_q,::step_q], 
+                      u_plot[::step_q,::step_q], v_plot[::step_q,::step_q], # Usa le variabili finali aggiornate!
+                      angles='xy', color=q_color, alpha=0.8, scale=q_scale, width=0.001, headwidth=3, headlength=4, headaxislength=3.5)
+
+            # 3. Creazione della freccia di riferimento (Scale Bar)
+            ref_length_um = 50 # Scegliamo 50 micrometri come riferimento
+            ref_length_px = ref_length_um / PIXEL_LENGTH
+            
+            # Coordinate per posizionarla in basso a destra (su 1908x1908)
+            x_ref = w - 300
+            y_ref = h - 200
+
+            # Disegna la freccia (puramente orizzontale, dx = ref_length_px, dy = 0)
+            ax.quiver(x_ref, y_ref, ref_length_px, 0, 
+                      angles='xy', color='white', scale=q_scale, width=0.003, headwidth=4)
+            
+            # Aggiungi 'family': 'serif' al testo
+            ax.text(x_ref + (ref_length_px/2), y_ref + 80, f'{ref_length_um} $\mu m$', 
+                color='white', fontsize=18, fontweight='bold', family='serif', ha='center', va='top')
+
+            # 4. Pulizia e Salvataggio
             ax.axis('off')
-            plt.title(f"Retinal Displacement (Interpolated) - Subject {subject_data['ID']}", fontsize=14, pad=15)
+            #plt.title(f"Retinal Displacement (Interpolated) - Subject {subject_data['ID']}", fontsize=16, pad=15)
             plt.tight_layout()
-            plt.savefig(os.path.join(DST_PATH, f"{subject_data['ID']}_RBF_plot.png"), dpi=600, bbox_inches='tight')
-            plt.savefig(os.path.join(DST_PATH, f"{subject_data['ID']}_RBF_plot.pdf"), dpi=600, bbox_inches='tight')
+            
+            plt.savefig(os.path.join(DST_PATH, f"{subject_data['ID']}_RBF_plot.png"), dpi=600, bbox_inches='tight',pad_inches=0)
+            plt.savefig(os.path.join(DST_PATH, f"{subject_data['ID']}_RBF_plot.pdf"), dpi=600, bbox_inches='tight',pad_inches=0)
             plt.close(fig)
 
-    df = pd.DataFrame(all_patients_data)
-    df.to_csv(CSV_RBF_FIELD_PATH, index=False)  
+            # Salvataggio CSV ad ogni iterazione per sicurezza
+            df = pd.DataFrame(all_patients_data)
+            df.to_csv(CSV_RBF_FIELD_PATH, index=False)  
